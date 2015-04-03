@@ -1,0 +1,8 @@
+{
+    "sensors": [{
+        "sensorname": "DS18B20",
+        "filename": "ds18b20",
+        "enabled": true,
+        "measurement": "temperature"
+    }]
+}
