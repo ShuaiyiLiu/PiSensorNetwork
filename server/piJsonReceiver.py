@@ -27,7 +27,6 @@ class PiJsonReceiver(protocol.Protocol):
         self._remainingData += data
         if data:
             try:
-                print data 
                 self._consumeData()
             except IncompleteCustomizedJson:
                 pass 

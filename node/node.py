@@ -11,24 +11,43 @@ import upload
 import threading
 import SocketServer
 
-PORT = 9999 # TODO: config
-intervalTime = 5 # TODO : config
+PORT = 9999 # port for receiving commands from ctlServer. 
+intervalTime = 5
 
 class CommandsHandler(SocketServer.BaseRequestHandler):
-    '''handle commands from server upon receiving'''
+    '''class for handling commands from server upon receiving'''
 
     def handle(self):
+        '''handle various commands'''
+        data = self.request.recv(1024) 
+        cmd = data.split()[0]
+        if cmd == 'edit':
+            self._update_config(*data.split()[1:])
+        elif cmd == 'show':
+            self._show_config()
+    
+    def _show_config(self):
+        '''handle commands that show configs'''
+        with open('config/node.json') as nodeConfigFile:
+            nodeCfgs = json.load(nodeConfigFile)['node']
+        data = ''.join('{0} = {1}\n'.format(key, nodeCfgs[key]) for key in
+                nodeCfgs)
+        self.request.send(data)
+        print 'sent configs to ctlServer.'
+ 
+    def _update_config(self, cfg, value):
+        '''handle commands that update configs'''
         global intervalTime
-        data = self.request.recv(1024) # TODO: use recv_all and sendall
-        
-        cfg, value = data.split()
-        
-        # TODO: edit all cfgs avaliable
-        if cfg == 'intervalTime' and value.isdigit():
+        with open('config/node.json') as nodeConfigFile:
+            nodeCfgs = json.load(nodeConfigFile)
+        #TODO: Is there any better way to implement the following codes?
+        if cfg == 'intervalTime':
             intervalTime = int(value)
-            print intervalTime
             self.request.send(cfg + 'has been changed to' + value)
-
+            nodeCfgs['node']['intervalTime'] = int(value)
+            with open('config/node.json', 'w') as nodeCfgFile:
+                json.dump(nodeCfgs, nodeCfgFile)
+            print cfg + 'has been changed to' + value + 'by ctlServer.'
 
 def recvCommands():
     '''receice commands from control server'''
@@ -60,12 +79,14 @@ def nodeRun():
 
     preTime = 0
     recvCommands()
+    global intervalTime
+    with open('config/node.json') as nodeConfigFile:
+        intervalTime = json.load(nodeConfigFile)['node']['intervalTime']
     while True:
         curTime  = time.time()
         if preTime > curTime: # in case somehow current time in system is modified
             preTime = 0
         if (curTime - preTime) > intervalTime:
-            print intervalTime
             preTime = curTime
             # Collect data form each sensor
             data = []

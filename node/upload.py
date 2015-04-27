@@ -11,6 +11,7 @@ def _connectServer():
     with open("config/node.json") as nodeConfigFile:
         serverConfig = json.load(nodeConfigFile)['server']
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(5)
     # TODO: supporting argument selecting host and port
     host = serverConfig['host']
     port = serverConfig['port']

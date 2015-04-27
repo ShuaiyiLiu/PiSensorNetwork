@@ -4,6 +4,6 @@
         "port": 8686
     },
     "node": {
-        "refresh_interval" : 5
+        "intervalTime" : 5
     }
 }

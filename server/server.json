@@ -1,0 +1,9 @@
+{
+    "ctlServer": {
+        "port": 9999 
+    },
+    "dataServer": {
+        "port" : 8686 
+    },
+    "nodelist": []
+}
