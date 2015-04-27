@@ -1,0 +1,9 @@
+{
+    "server": {
+        "host": "192.168.3.1",
+        "port": 8686
+    },
+    "node": {
+        "refresh_interval" : 5
+    }
+}
