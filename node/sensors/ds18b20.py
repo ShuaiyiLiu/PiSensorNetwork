@@ -25,8 +25,7 @@ def getValueName():
 
 def getValue():
     '''Return temperature in Celsius'''
-    if not os.path.isdir(DEVICES_DIR):
-        _load_kernel_modules()
+    _load_kernel_modules()
     sensorPaths = [s for s in os.listdir(DEVICES_DIR) if s.startswith(DIR_DIGITS)]
     if len(sensorPaths) == 0: 
         raise sensorErrors.NoSensorFoundError(SENSOR_NAME)    
