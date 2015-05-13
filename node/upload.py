@@ -7,6 +7,8 @@ import json
 import datetime
 import sys
 
+MAX_LENGTH = 1024
+
 def _connectServer():
     with open("config/node.json") as nodeConfigFile:
         serverConfig = json.load(nodeConfigFile)['server']
@@ -25,6 +27,12 @@ def upload(data):
     try:
         sock = _connectServer()
         sock.sendall(data)
+        more = sock.recv(MAX_LENGTH)
+        data = ''
+        while len(more):
+            data += more
+            more = sock.recv(MAX_LENGTH)
+        return data
     except socket.error:
         print 'cannot send data to server.'
         pass

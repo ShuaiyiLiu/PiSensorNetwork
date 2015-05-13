@@ -1,9 +1,1 @@
-{
-    "server": {
-        "host": "192.168.3.1",
-        "port": 8686
-    },
-    "node": {
-        "intervalTime" : 5
-    }
-}
+{"node": {"node_id": 31, "intervalTime": 5, "name": "Earth"}, "server": {"host": "127.0.0.1", "port": 8686}}

@@ -34,7 +34,7 @@ class PiJsonReceiver(protocol.Protocol):
                 self._handleParseError()
     
     
-    def dictReceived(self, dct):
+    def dictsReceived(self, dcts):
         """
         Override this for notification when each complete dictionary is
         tranformed.
@@ -50,9 +50,8 @@ class PiJsonReceiver(protocol.Protocol):
         if self._remainingData.endswith('\r\n\r\n'):
             try:
                 import json
-                dct = json.loads(self._remainingData[0:-4])
-                self.dictReceived(dct)
-                self.transport.loseConnection()
+                dcts = json.loads(self._remainingData[0:-4])
+                self.dictsReceived(dcts)
             except ValueError:
                 raise ValueError
         else:

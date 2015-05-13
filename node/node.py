@@ -82,6 +82,11 @@ def nodeRun():
     global intervalTime
     with open('config/node.json') as nodeConfigFile:
         intervalTime = json.load(nodeConfigFile)['node']['intervalTime']
+        nodeName = json.load(nodeConfigFile)['node']['name']
+        nodeID = json.load(nodeCfgFile)['node']['node_id']
+        if nodeID == 0:
+            raise Exception("ERROR: Not register at server yet.")
+
     while True:
         curTime  = time.time()
         if preTime > curTime: # in case somehow current time in system is modified
@@ -89,7 +94,7 @@ def nodeRun():
         if (curTime - preTime) > intervalTime:
             preTime = curTime
             # Collect data form each sensor
-            data = []
+            data = [{"name": nodeName, "node_id" = nodeID}]
             for sensorCfg in sensorCfgs:
                 dataDict = {}
                 sensorname = sensorCfg['sensorname']
@@ -122,6 +127,7 @@ def nodeRun():
             for d in data:
                 print d['value_name'] + ':' + str(d['value']) + " " + d['unit']  
                 
+            data.append("upload")
             upload.upload(json.dumps(data) + '\r\n\r\n')
             time.sleep(1)
 nodeRun()
@@ -137,15 +143,3 @@ if __name__ == '__main__':
             print e
             upload.upload
 '''
-
-
-
-
-
-
-
-
-
-
-
-

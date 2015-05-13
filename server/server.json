@@ -5,5 +5,11 @@
     "dataServer": {
         "port" : 8686 
     },
-    "nodelist": []
+    "nodelist": [],
+    "database": {
+        "module": "MySQLdb",
+        "db": "mapdb",
+        "user": "root",
+        "passwd": ""
+    }
 }
