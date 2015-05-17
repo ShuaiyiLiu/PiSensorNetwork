@@ -14,8 +14,8 @@ DIR_DIGITS = '28' # sensor's dirctory name starts with 28
 
 def _load_kernel_modules():
     '''Load kernel module needed by temperature sensor'''
-    os.system('modprobe w1-gpio');
-    os.system('modprobe w1-therm');
+    os.system('sudo modprobe w1-gpio');
+    os.system('sudo modprobe w1-therm');
 
 def getUnit():
     return VAL_UNIT
