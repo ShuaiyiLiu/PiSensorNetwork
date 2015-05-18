@@ -3,13 +3,16 @@
 from twisted.internet.defer import Deferred
 from twisted.internet.protocol import ServerFactory
 from twisted.internet import protocol
-from piJsonReceiver import PiJsonReceiver
 from twisted.enterprise import adbapi
+from twisted.python import log
 from twistar.registry import Registry
 from twistar.dbobject import DBObject
+from piJsonReceiver import PiJsonReceiver
 import json
 import datetime
-
+import logging
+import sys
+import myObserver
 
 HOST = '127.0.0.1'
 PORT = 8686
@@ -40,13 +43,26 @@ class DataServerProtocol(PiJsonReceiver):
     Protocol used by data server. 
     """
     def dictsReceived(self, dcts):
-        print 'Data Received.', dcts
-        dataType = dcts[-1]
+        try:
+            dataType = dcts[-1]
+        except Exception as e:
+            myObserver.msg("Invalid data received")
+            self.transport.write("Invalid data.")
+            self.transport.loseConnection()
+            raise e
         clientip = self.transport.getPeer().host
+        myObserver.msg("Data Received from {}.".format(clientip), logLevel =
+                logging.DEBUG)
         if (dataType == "upload"):
             self.dbInsert(dcts[:-1]) # the last element is datatype
         elif (dataType == "register"):
             self.dbRegister(dcts[:-1], clientip)
+        else:
+            message = "Data type {} from {} cannot be recognized!".format(
+                    dataType, clientip)
+            self.transport.write(message)
+            myObserver.msg(message, logLevel = logging.DEBUG)
+            self.transport.loseConnection()
     
     def _dbRegisterRespond(self, transaction, nodeName, ip):
         transaction.execute("""INSERT INTO map_node (name, ip) 
@@ -59,13 +75,17 @@ class DataServerProtocol(PiJsonReceiver):
         transaction.execute("""INSERT INTO map_nodeVersion (node_id, longitude,
                             latitude) VALUES
                             (%s, %s, %s)""", (transaction.lastrowid, 0, 0))
+        myObserver.msg("{} has successfully registered".
+                format(nodeName), logLevel = logging.INFO)
         self.transport.loseConnection()
         return True
 
     def dbRegisterRespond(self, res, nodeName, ip):
         if res:
             # already exists
-            print "failed"
+            myObserver.msg("Failed to register for {}:".format(nodeName) + 
+                    "node name already exists", logLevel =
+                    logging.INFO)
             self.transport.write("Failed! Node name already exists.")
             self.transport.loseConnection()
         else:
@@ -107,9 +127,11 @@ class DataServerProtocol(PiJsonReceiver):
         d = MapNodeVersion.find(where = ["node_id = ?", nodeID], 
                                 orderby = "version_id DESC")
         d.addCallback(lambda vid: self._dbInsertData(vid, dcts[1:]))
+        myObserver.msg("Data from node with ID: {} has been stored".
+                format(nodeID), logLevel = logging.DEBUG)
         
     def connectionLost(self, reason):
-        print reason
+        pass
 
 class DataServerFactory(ServerFactory):
     """
@@ -121,10 +143,12 @@ def main():
     from twisted.internet import reactor
     factory = DataServerFactory()
     port = reactor.listenTCP(PORT, factory)
-    print 'reactor is running on port 8686'
+    myObserver.startLogging(sys.stdout)
+    myObserver.addObserver(myObserver.MyFileLogObserver(file("log", "w")).emit)
+    myObserver.msg("Data Server Running at port {} now.".format(PORT),
+            logLevel=logging.INFO)
     reactor.run()
 
 if __name__ == "__main__":
     main()
-
 
