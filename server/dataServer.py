@@ -5,6 +5,7 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet import protocol
 from twisted.enterprise import adbapi
 from twisted.python import log
+from twisted.internet.task import LoopingCall
 from twistar.registry import Registry
 from twistar.dbobject import DBObject
 from piJsonReceiver import PiJsonReceiver
@@ -16,7 +17,14 @@ import myObserver
 
 HOST = '127.0.0.1'
 PORT = 8686
-
+WORKING = 0
+NOTRESPONDING = 1
+EXCEPTION = 2
+STATE_REFRESH_TIME = 5 
+STATES = ["WORKING", "NOTRESPONDING", "EXCEPTION"]
+MAX_INTERVAL = 15 # nodes are considered as NOTRESPONDING if no message from
+                  # them for more than MAX_INTERVAL
+nsm = {}
 # database connection
 dbpool = None
 with open("server.json") as serverCfgFile:
@@ -38,6 +46,10 @@ class MapData(DBObject):
     """Class for map_data table."""
     TABLENAME = 'map_data'
 
+class MapNodeState(DBObject):
+    """Class for map_nodeState table."""
+    TABLENAME = 'map_nodeState'
+
 class DataServerProtocol(PiJsonReceiver):
     """
     Protocol used by data server. 
@@ -57,6 +69,9 @@ class DataServerProtocol(PiJsonReceiver):
             self.dbInsert(dcts[:-1]) # the last element is datatype
         elif (dataType == "register"):
             self.dbRegister(dcts[:-1], clientip)
+        elif (dataType == "exception"):
+            #TODO
+            self.nodeException(dcts[:-1])
         else:
             message = "Data type {} from {} cannot be recognized!".format(
                     dataType, clientip)
@@ -64,20 +79,32 @@ class DataServerProtocol(PiJsonReceiver):
             myObserver.msg(message, logLevel = logging.DEBUG)
             self.transport.loseConnection()
     
+    def nodeException(self, dcts):
+        """Handle node exception"""
+        global nsm
+        nodeID = dcts[0]["node_id"]
+        nsm[nodeID] = ["EXCEPTION", datetime.datetime.now()]
+
     def _dbRegisterRespond(self, transaction, nodeName, ip):
+        global nsm
         transaction.execute("""INSERT INTO map_node (name, ip) 
                             VALUES (%s, %s)""", (nodeName, ip))
         # TODO: Here we always insert a row in table map_nodeVersion, but once
         # how lon/lat works is figured out, nodeVersion should be updated 
         # only when lon/lat is changed. 
+        nodeID = transaction.lastrowid
         self.transport.write("""SUCCESS! Your ID is {}""".
-                format(transaction.lastrowid))
+                format(nodeID))
         transaction.execute("""INSERT INTO map_nodeVersion (node_id, longitude,
                             latitude) VALUES
-                            (%s, %s, %s)""", (transaction.lastrowid, 0, 0))
+                            (%s, %s, %s)""", (nodeID, 0, 0))
+        transaction.execute("""INSERT INTO map_nodeState (node_id, status)
+                            VALUES (%s, %s)""", (nodeID,
+                                "NOTRESPONDING"))
         myObserver.msg("{} has successfully registered".
                 format(nodeName), logLevel = logging.INFO)
         self.transport.loseConnection()
+        nsm[nodeID] = [NOTRESPONDING, datetime.datetime.now()]
         return True
 
     def dbRegisterRespond(self, res, nodeName, ip):
@@ -103,6 +130,7 @@ class DataServerProtocol(PiJsonReceiver):
         mapData = MapData()
         mapData.temperature = 20 # defalut 
         mapData.humidity = 5
+        mapNodeState = MapNodeState()
         for dct in dcts:
             value = dct["value"]
             value_name = dct["value_name"]
@@ -121,12 +149,14 @@ class DataServerProtocol(PiJsonReceiver):
         """
         Insert environmental data received from nodes to database.
         """
+        global nsm
         nodeID = dcts[0]["node_id"]
         # d, a deferred is already fired, and rows in nodeversion table will be
         # returned to callbacks added to d
         d = MapNodeVersion.find(where = ["node_id = ?", nodeID], 
                                 orderby = "version_id DESC")
         d.addCallback(lambda vid: self._dbInsertData(vid, dcts[1:]))
+        nsm[nodeID] = [nsm[nodeID][0], datetime.datetime.now()]
         myObserver.msg("Data from node with ID: {} has been stored".
                 format(nodeID), logLevel = logging.DEBUG)
         
@@ -139,14 +169,75 @@ class DataServerFactory(ServerFactory):
     """
     protocol = DataServerProtocol
 
+def dbUpdateStates(transaction, nodeID, state):
+    transaction.execute("""INSERT INTO map_nodeState (node_id, status)
+                        VALUES (%s, %s) ON DUPLICATE KEY UPDATE status =
+                        VALUES(status)""", (nodeID,
+                        state))
+
+def stateMonitor():
+    """
+    Monitor of nodes' heart beats.
+    """
+    import MySQLdb
+    from contextlib import closing
+    global nsm
+    with open("server.json") as serverCfgFile:
+        dbCfg = json.load(serverCfgFile)["database"]
+        db = MySQLdb.connect(db = dbCfg["db"], user = dbCfg["user"])
+    for nodeID in nsm.keys():
+        curTime = datetime.datetime.now()
+        diffTime = (curTime - nsm[nodeID][1]).total_seconds()
+        refreshed = False
+        if nsm[nodeID][0] == WORKING and diffTime > MAX_INTERVAL:
+            nsm[nodeID][0] = NOTRESPONDING
+            myObserver.msg(
+                "Node({})'s state is changed from WORKING to".format(nodeID) + 
+                "NOTRESPONDING.")
+            refreshed = True
+        elif nsm[nodeID][0] == NOTRESPONDING and diffTime < MAX_INTERVAL:
+            nsm[nodeID][0] = WORKING
+            myObserver.msg(
+                "Node({})'s state is changed from NOTRESPONDING to".format(nodeID) + 
+                "WORKING.")
+            refreshed = True
+        elif nsm[nodeID][0] == EXCEPTION and diffTime < MAX_INTERVAL:
+            nsm[nodeID][0] = WORKING
+            myObserver.msg(
+                "Node({})'s state is changed from EXCEPTION to".format(nodeID) + 
+                "WORKING.")
+            refreshed = True
+
+        if refreshed:
+            dbpool.runInteraction(dbUpdateStates, nodeID, STATES[nsm[nodeID][0]])
+
+def getNodesFromDB():
+    import MySQLdb
+    from contextlib import closing
+    global nsm
+    with open("server.json") as serverCfgFile:
+        dbCfg = json.load(serverCfgFile)["database"]
+        db = MySQLdb.connect(db = dbCfg["db"], user = dbCfg["user"])
+    with closing(db.cursor()) as cur:
+        cur.execute("""SELECT * FROM map_node;""")
+        nodes = cur.fetchall()
+        for node in nodes:
+            curTime = datetime.datetime.now()
+            nsm[node[0]] = [NOTRESPONDING, curTime.replace(2000)]
+    db.close()
+
 def main():
     from twisted.internet import reactor
     factory = DataServerFactory()
     port = reactor.listenTCP(PORT, factory)
     myObserver.startLogging(sys.stdout)
+    nsm = getNodesFromDB()
+    # TODO: assign a new name to log file everytime.
     myObserver.addObserver(myObserver.MyFileLogObserver(file("log", "w")).emit)
     myObserver.msg("Data Server Running at port {} now.".format(PORT),
             logLevel=logging.INFO)
+    loopObj = LoopingCall(stateMonitor)
+    loopObj.start(STATE_REFRESH_TIME, now=True)
     reactor.run()
 
 if __name__ == "__main__":
