@@ -5,16 +5,21 @@ Implementation of commands in control server.
 _INVALID_ARGS = 'Invalid arguments! Please check again!'
 _CONFIG_FILE = 'server.json'
 
-def add_node(*args):
-    '''add_node: <node-ip> [<new-node-ip>]add a new node to network or update 
-    an exsiting node.'''
-
-    # both add_node and show_nodes require accessing database 
-    pass
-
 def show_nodes(*args):
     '''show_nodes: list all avaliable nodes.'''
-    pass
+    import MySQLdb
+    import json
+    from contextlib import closing
+    with open("server.json") as serverCfgFile:
+        dbCfg = json.load(serverCfgFile)["database"]
+        db = MySQLdb.connect(db = dbCfg["db"], user = dbCfg["user"])
+    with closing(db.cursor()) as cur:
+        cur.execute("""SELECT * FROM map_node;""")
+        nodes = cur.fetchall()
+        for node in nodes:
+            if node is not None:
+                print "Node ID: {}      Node name: {}        Node IP: {}".format(*node)
+    db.close()
 
 def _get_port():
     '''get port that control service is used from config file'''
@@ -60,7 +65,6 @@ def edit_configs(*args):
     '''
     if len(args) != 4:
         return _INVALID_ARGS 
-
     # TODO: Check if ip is valid
     import socket
     port = _get_port() 

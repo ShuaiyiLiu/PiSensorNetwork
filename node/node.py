@@ -13,15 +13,21 @@ import SocketServer
 import logging
 
 PORT = 9999 # port for receiving commands from ctlServer. 
-intervalTime = 5
+with open('config/node.json') as nodeConfigFile:
+    for key in nodeCfgs.keys():
+        if key != "name" and key != "node_id":
+            cfgs[key] = nodeCfgs[key]
+cfgs = {} # changeable configs read from node.json
 logging.basicConfig(format='%(asctime)s <%(levelname)s> %(message)s', level=logging.DEBUG)
 logs = []
 
-def loggingSave(msg, func):
+def loggingSave(msg, level, func):
     """logging and saving logs."""
     global logs
+    global reportLevel
     func(msg)
-    logs.append(msg)
+    if level >= cfgs["report_level"]:
+        logs.append(msg)
 
 class CommandsHandler(SocketServer.BaseRequestHandler):
     '''class for handling commands from server upon receiving'''
@@ -40,23 +46,25 @@ class CommandsHandler(SocketServer.BaseRequestHandler):
         with open('config/node.json') as nodeConfigFile:
             nodeCfgs = json.load(nodeConfigFile)['node']
         data = ''.join('{0} = {1}\n'.format(key, nodeCfgs[key]) for key in
-                nodeCfgs)
+                nodeCfgs if key != "name" and key != "node_id")
         self.request.send(data)
-        print 'sent configs to ctlServer.'
+        loggingSave('sent configs to ctlServer.', logging.INFO, logging.info)
  
     def _update_config(self, cfg, value):
         '''handle commands that update configs'''
-        global intervalTime
+        global cfgs
         with open('config/node.json') as nodeConfigFile:
             nodeCfgs = json.load(nodeConfigFile)
-        #TODO: Is there any better way to implement the following codes?
-        if cfg == 'intervalTime':
-            intervalTime = int(value)
-            self.request.send(cfg + 'has been changed to' + value)
-            nodeCfgs['node']['intervalTime'] = int(value)
+        if cfgs.has_key(cfg):
+            cfgs[cfg] = int(value)
+            self.request.send(cfg + "has been changed to " + value)
+            nodeCfgs['node'][cfg] = int(value)
             with open('config/node.json', 'w') as nodeCfgFile:
                 json.dump(nodeCfgs, nodeCfgFile)
-            print cfg + 'has been changed to' + value + 'by ctlServer.'
+            loggingSave(cfg + "has been changed to " + value +"by ctlServer", 
+                    logging.INFO, logging.info)
+        else:
+            self.request.send("Unknown config option: " + cfg)
 
 def recvCommands():
     '''receice commands from control server'''
@@ -79,33 +87,36 @@ def nodeRun():
                 enabled = sensorCfg['enabled']
                 sensorname = sensorCfg['sensorname']
             except Exception:
-                loggingSave("Missing option(s) in config file.", logging.error)
+                loggingSave("Missing option(s) in config file.", logging.ERROR,
+                        logging.error)
                 raise
             loggingSave("Successfully load sensor {0} config file!".format(
-                sensorname), logging.info)
+                sensorname), logging.INFO, logging.info)
         except Exception as e: # TODO: define exception for this
             loggingSave("Failed to load sensor config file! Please make sure" +
-            " it's correct.", logging.error)
+            " it's correct.", logging.ERROR, logging.error)
             raise e
 
     preTime = 0
     recvCommands()
-    global intervalTime
+    global cfgs
     with open('config/node.json') as nodeConfigFile:
         nodeCfgs = json.load(nodeConfigFile)['node']
-        intervalTime = nodeCfgs['intervalTime']
         nodeName = nodeCfgs['name']
         nodeID = nodeCfgs['node_id']
+        for key in nodeCfgs.keys():
+            if key != "name" and key != "node_id":
+                cfgs[key] = nodeCfgs[key]
         if nodeID == 0:
             loggingSave("Not register at server yet. Please run register.py"
-            " first.", logging.error)
+            " first.", logging.ERROR, logging.error)
             raise Exception("ERROR: Not register at server yet.")
 
     while True:
         curTime  = time.time()
         if preTime > curTime: # in case somehow current time in system is modified
             preTime = 0
-        if (curTime - preTime) > intervalTime:
+        if (curTime - preTime) > cfgs["intervalTime"]:
             preTime = curTime
             # Collect data form each sensor
             data = [{"name": nodeName, "node_id" : nodeID}]
@@ -120,7 +131,7 @@ def nodeRun():
                         plugin = __import__('sensors.' + filename, fromlist=['a'])
                     except Exception:
                         loggingSave("Could not find sensor {0}'s plugin file!".format(
-                            sensorname), logging.error)
+                            sensorname), logging.ERROR, logging.error)
                     dataDict = {}
                     try:
                         dataDict["value"] = plugin.getValue()
@@ -131,19 +142,12 @@ def nodeRun():
                         data.append(dataDict)
                     except Exception:
                         loggingSave("Missing function(s) in {0}'s plugin file".format(
-                            sensorname), logging.error)
+                            sensorname), logging.ERROR, logging.error)
             global logs
             loggingData = {"value_name": "log", "value": str(logs)}
             logs = []
-            working = True
-            output = "Time: " + str(datetime.datetime.now()) + '\n'
-            for d in data:
-                output = output + d['value_name'] + ':' + str(d['value']) + " " + d['unit']  
             print ""
             print "Time: " + str(datetime.datetime.now())
-            for d in data:
-                print d['value_name'] + ':' + str(d['value']) + " " + d['unit']  
-                
             data.append("upload")
             upload.upload(json.dumps(data) + '\r\n\r\n')
             time.sleep(1)
@@ -158,9 +162,13 @@ if __name__ == '__main__':
     except Exception, e:
         exc_type, exc_value, exc_tb = sys.exc_info()
         tb = traceback.format_exception(exc_type, exc_value, exc_tb)
-        logging.CRITICAL(tb)
+        logging.critical(tb)
+        with open('config/node.json') as nodeConfigFile:
+            nodeCfgs = json.load(nodeConfigFile)['node']
+            nodeName = nodeCfgs['name']
+            nodeID = nodeCfgs['node_id']
         data = [{"name": nodeName, "node_id" : nodeID}]
         data.append(tb)
         data.append("exception")
-        upload.upload(data)
+        upload.upload(json.dumps(data) + '\r\n\r\n')
         nodeRun()

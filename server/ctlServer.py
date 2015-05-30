@@ -19,7 +19,7 @@ def discription():
         print cmd.__doc__
 
 def main():
-    discription();
+    discription()
 
     while True:
         request = raw_input('cmd > ').split()
@@ -27,7 +27,8 @@ def main():
         if hasattr(ctlCommands, cmd):
             cmdInst = getattr(ctlCommands, cmd)
             msg = cmdInst(*request)
-            print msg
+            if msg is not None:
+                print msg
         else:
             print 'Command Wrong! Check and type again.'
             continue

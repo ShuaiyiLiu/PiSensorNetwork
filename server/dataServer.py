@@ -66,7 +66,7 @@ class DataServerProtocol(PiJsonReceiver):
         myObserver.msg("Data Received from {}.".format(clientip), logLevel =
                 logging.DEBUG)
         if (dataType == "upload"):
-            self.dbInsert(dcts[:-1]) # the last element is datatype
+            self.dbInsert(dcts[:-1], clientip) # the last element is datatype
         elif (dataType == "register"):
             self.dbRegister(dcts[:-1], clientip)
         elif (dataType == "exception"):
@@ -84,6 +84,8 @@ class DataServerProtocol(PiJsonReceiver):
         global nsm
         nodeID = dcts[0]["node_id"]
         nsm[nodeID] = ["EXCEPTION", datetime.datetime.now()]
+        myObserver.msg("Exception from node {}.".format(nodeID), logLevel =
+                logging.WARNING)
 
     def _dbRegisterRespond(self, transaction, nodeName, ip):
         global nsm
@@ -126,7 +128,8 @@ class DataServerProtocol(PiJsonReceiver):
         d = MapNode.exists(where = ['name = ?', nodeName])
         d.addCallback(lambda res: self.dbRegisterRespond(res, nodeName, ip))
     
-    def _dbInsertData(self, version_id, dcts):
+    def _dbInsertData(self, version_id, dcts, ip, nodeID):
+        mapNode = MapNode()
         mapData = MapData()
         mapData.temperature = 20 # defalut 
         mapData.humidity = 5
@@ -140,12 +143,17 @@ class DataServerProtocol(PiJsonReceiver):
             elif value_name == "humidity":
                 mapData.humidity = value
         mapData.creat_time = str(datetime.datetime.now())
-        def done(foo):
-            self.transport.write("Data Upload Succeeded!")
+        def done(foo, bool):
+            if bool:
+                self.transport.write("Data Upload Succeeded!")
             self.transport.loseConnection()
-        mapData.save().addCallback(done)
+        mapData.save().addCallback(lambda res:done(res, True))
+        def updateIPandLog(transaction, ip):
+            transaction.execute("""UPDATE map_node SET ip = %s WHERE node_id =
+                    %s""", (ip, nodeID))
+        dbpool.runInteraction(updateIPandLog, ip)
 
-    def dbInsert(self, dcts):
+    def dbInsert(self, dcts, ip):
         """
         Insert environmental data received from nodes to database.
         """
@@ -155,7 +163,7 @@ class DataServerProtocol(PiJsonReceiver):
         # returned to callbacks added to d
         d = MapNodeVersion.find(where = ["node_id = ?", nodeID], 
                                 orderby = "version_id DESC")
-        d.addCallback(lambda vid: self._dbInsertData(vid, dcts[1:]))
+        d.addCallback(lambda vid: self._dbInsertData(vid, dcts[1:], ip, nodeID))
         nsm[nodeID] = [nsm[nodeID][0], datetime.datetime.now()]
         myObserver.msg("Data from node with ID: {} has been stored".
                 format(nodeID), logLevel = logging.DEBUG)
