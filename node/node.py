@@ -13,18 +13,19 @@ import SocketServer
 import logging
 
 PORT = 9999 # port for receiving commands from ctlServer. 
+cfgs = {} # changeable configs read from node.json
 with open('config/node.json') as nodeConfigFile:
+    nodeCfgs = json.load(nodeConfigFile)['node']
     for key in nodeCfgs.keys():
         if key != "name" and key != "node_id":
             cfgs[key] = nodeCfgs[key]
-cfgs = {} # changeable configs read from node.json
 logging.basicConfig(format='%(asctime)s <%(levelname)s> %(message)s', level=logging.DEBUG)
 logs = []
 
 def loggingSave(msg, level, func):
     """logging and saving logs."""
+    global cfgs
     global logs
-    global reportLevel
     func(msg)
     if level >= cfgs["report_level"]:
         logs.append(msg)
@@ -86,10 +87,10 @@ def nodeRun():
                 filename = sensorCfg['filename']
                 enabled = sensorCfg['enabled']
                 sensorname = sensorCfg['sensorname']
-            except Exception:
+            except Exception, e:
                 loggingSave("Missing option(s) in config file.", logging.ERROR,
                         logging.error)
-                raise
+                raise e
             loggingSave("Successfully load sensor {0} config file!".format(
                 sensorname), logging.INFO, logging.info)
         except Exception as e: # TODO: define exception for this
@@ -104,9 +105,6 @@ def nodeRun():
         nodeCfgs = json.load(nodeConfigFile)['node']
         nodeName = nodeCfgs['name']
         nodeID = nodeCfgs['node_id']
-        for key in nodeCfgs.keys():
-            if key != "name" and key != "node_id":
-                cfgs[key] = nodeCfgs[key]
         if nodeID == 0:
             loggingSave("Not register at server yet. Please run register.py"
             " first.", logging.ERROR, logging.error)
@@ -129,9 +127,10 @@ def nodeRun():
                     try:
                         # the following code works as long as fromlist is not empty
                         plugin = __import__('sensors.' + filename, fromlist=['a'])
-                    except Exception:
+                    except Exception, e:
                         loggingSave("Could not find sensor {0}'s plugin file!".format(
                             sensorname), logging.ERROR, logging.error)
+                        raise e
                     dataDict = {}
                     try:
                         dataDict["value"] = plugin.getValue()
@@ -140,14 +139,14 @@ def nodeRun():
                         dataDict["sensor"] = sensorname
                         dataDict["time"] = str(datetime.datetime.now())
                         data.append(dataDict)
-                    except Exception:
+                    except Exception, e:
                         loggingSave("Missing function(s) in {0}'s plugin file".format(
                             sensorname), logging.ERROR, logging.error)
+                        raise e
             global logs
             loggingData = {"value_name": "log", "value": str(logs)}
+            data.append(loggingData)
             logs = []
-            print ""
-            print "Time: " + str(datetime.datetime.now())
             data.append("upload")
             upload.upload(json.dumps(data) + '\r\n\r\n')
             time.sleep(1)

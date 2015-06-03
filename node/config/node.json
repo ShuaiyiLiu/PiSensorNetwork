@@ -1,3 +1,10 @@
 {
     "node": {"node_id": 31, "intervalTime": 5, "name": "Earth", "report_level": 30},
-    "server": {"host": "127.0.0.1", "port": 8686}}
+    "server": {"host": "127.0.0.1", "port": 8686}
+    "database": {
+        "module": "MySQLdb",
+        "db": "mapdb",
+        "user": "root",
+        "passwd": ""
+        "max_rows": 10
+    }}

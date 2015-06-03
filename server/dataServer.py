@@ -54,6 +54,7 @@ class DataServerProtocol(PiJsonReceiver):
     """
     Protocol used by data server. 
     """
+    
     def dictsReceived(self, dcts):
         try:
             dataType = dcts[-1]
@@ -70,8 +71,9 @@ class DataServerProtocol(PiJsonReceiver):
         elif (dataType == "register"):
             self.dbRegister(dcts[:-1], clientip)
         elif (dataType == "exception"):
-            #TODO
             self.nodeException(dcts[:-1])
+        elif (dataType == "upload_request"):
+            self.requestHandler(dcts[:-1])
         else:
             message = "Data type {} from {} cannot be recognized!".format(
                     dataType, clientip)
@@ -129,29 +131,41 @@ class DataServerProtocol(PiJsonReceiver):
         d.addCallback(lambda res: self.dbRegisterRespond(res, nodeName, ip))
     
     def _dbInsertData(self, version_id, dcts, ip, nodeID):
-        mapNode = MapNode()
-        mapData = MapData()
-        mapData.temperature = 20 # defalut 
-        mapData.humidity = 5
-        mapNodeState = MapNodeState()
-        for dct in dcts:
-            value = dct["value"]
-            value_name = dct["value_name"]
-            mapData.collect_time = dct["time"]
-            if value_name == "temperature":
-                mapData.temperature = value
-            elif value_name == "humidity":
-                mapData.humidity = value
-        mapData.creat_time = str(datetime.datetime.now())
-        def done(foo, bool):
-            if bool:
-                self.transport.write("Data Upload Succeeded!")
+
+        def dbData(transaction, dcts):
+            data_id = 0
+            temperature = 20
+            humidity = 5
+            for dct in dcts:
+                value = dct["value"]
+                value_name = dct["value_name"]
+                if dct.has_key("time"):
+                    collect_time = dct["time"]
+                if value_name == "Temperature":
+                    temperature = value
+                elif value_name == "Humidity":
+                    humidity = value
+                elif value_name == "DataID":
+                    data_id = value
+                    creat_time = str(datetime.datetime.now())
+                    transaction.execute("""INSERT INTO map_data (temperature, 
+                            humidity, version_id, collect_time, data_id, 
+                            creat_time) VALUES (%s, %s, %s, %s, %s, %s)""",
+                            (temperature, humidity, version_id, collect_time,
+                                data_id, creat_time))
+            return data_id
+        
+        def sendBackDataID(data_id):
+            self.transport.write("Upload Successful! " + 
+                "Requested data ID is {}".format(data_id+1))
             self.transport.loseConnection()
-        mapData.save().addCallback(lambda res:done(res, True))
-        def updateIPandLog(transaction, ip):
+
+        dbpool.runInteraction(dbData, dcts).addCallback(sendBackDataID)               
+
+        def updateIP(transaction, ip):
             transaction.execute("""UPDATE map_node SET ip = %s WHERE node_id =
                     %s""", (ip, nodeID))
-        dbpool.runInteraction(updateIPandLog, ip)
+        dbpool.runInteraction(updateIP, ip)
 
     def dbInsert(self, dcts, ip):
         """
@@ -162,12 +176,40 @@ class DataServerProtocol(PiJsonReceiver):
         # d, a deferred is already fired, and rows in nodeversion table will be
         # returned to callbacks added to d
         d = MapNodeVersion.find(where = ["node_id = ?", nodeID], 
-                                orderby = "version_id DESC")
-        d.addCallback(lambda vid: self._dbInsertData(vid, dcts[1:], ip, nodeID))
+                                orderby = "version_id DESC", limit = 1)
+        d.addCallback(lambda vid: self._dbInsertData(vid.version_id, dcts[1:], ip, nodeID))
         nsm[nodeID] = [nsm[nodeID][0], datetime.datetime.now()]
         myObserver.msg("Data from node with ID: {} has been stored".
                 format(nodeID), logLevel = logging.DEBUG)
-        
+
+    def _sendRequestedDataID(self, latestData):
+        lastDataId = 1
+        if latestData is None:
+            self.transport.write("requested data ID is 1")
+        else:
+            lastDataId = latestData.data_id
+            self.transport.write("requested data ID is {}".format(lastDataId + 1))
+        self.transport.loseConnection()
+        return lastDataId + 1
+
+    def sendRequestedDataID(self, nodeVersion, nodeID):
+        if nodeVersion is None:
+            self.transport.write("Node version does not exsits. Try re-register?")
+            self.transport.loseConnection()
+            return
+        version_id = nodeVersion.version_id
+        d = MapData.find(where = ["version_id = ?", version_id],
+                         orderby = "data_id DESC", limit = 1)
+        d.addCallback(lambda res: self._sendRequestedDataID(res))
+        return d
+
+    def requestHandler(self, dcts):
+        "Handle the upload_request datatype by sending nodes their requested data id."
+        nodeID = dcts[0]["node_id"]
+        d = MapNodeVersion.find(where = ["node_id = ?", nodeID],
+                                orderby = "version_id DESC", limit = 1)
+        d.addCallback(lambda res: self.sendRequestedDataID(res, nodeID))
+
     def connectionLost(self, reason):
         pass
 
@@ -200,19 +242,19 @@ def stateMonitor():
         if nsm[nodeID][0] == WORKING and diffTime > MAX_INTERVAL:
             nsm[nodeID][0] = NOTRESPONDING
             myObserver.msg(
-                "Node({})'s state is changed from WORKING to".format(nodeID) + 
+                "Node({})'s state is changed from WORKING to ".format(nodeID) + 
                 "NOTRESPONDING.")
             refreshed = True
         elif nsm[nodeID][0] == NOTRESPONDING and diffTime < MAX_INTERVAL:
             nsm[nodeID][0] = WORKING
             myObserver.msg(
-                "Node({})'s state is changed from NOTRESPONDING to".format(nodeID) + 
+                "Node({})'s state is changed from NOTRESPONDING to ".format(nodeID) + 
                 "WORKING.")
             refreshed = True
         elif nsm[nodeID][0] == EXCEPTION and diffTime < MAX_INTERVAL:
             nsm[nodeID][0] = WORKING
             myObserver.msg(
-                "Node({})'s state is changed from EXCEPTION to".format(nodeID) + 
+                "Node({})'s state is changed from EXCEPTION to ".format(nodeID) + 
                 "WORKING.")
             refreshed = True
 
