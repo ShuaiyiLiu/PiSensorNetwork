@@ -147,9 +147,8 @@ def nodeRun():
             loggingData = {"value_name": "log", "value": str(logs)}
             data.append(loggingData)
             logs = []
-            data.append("upload")
-            upload.upload(json.dumps(data) + '\r\n\r\n')
-            time.sleep(1)
+            upload.dbDump(data)
+            time.sleep(cfgs["intervalTime"] / 10)
 if __name__ == '__main__':
     # ensures the main process doesn't terminate becasue of exceptions(neither
     # expected nor unexpected). Report the error message and let the 

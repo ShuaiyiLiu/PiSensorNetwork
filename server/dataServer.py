@@ -140,27 +140,25 @@ class DataServerProtocol(PiJsonReceiver):
                 value = dct["value"]
                 value_name = dct["value_name"]
                 if dct.has_key("time"):
-                    collect_time = dct["time"]
+                    creat_time = dct["time"]
                 if value_name == "Temperature":
                     temperature = value
                 elif value_name == "Humidity":
                     humidity = value
                 elif value_name == "DataID":
-                    data_id = value
-                    creat_time = str(datetime.datetime.now())
                     transaction.execute("""INSERT INTO map_data (temperature, 
-                            humidity, version_id, collect_time, data_id, 
-                            creat_time) VALUES (%s, %s, %s, %s, %s, %s)""",
-                            (temperature, humidity, version_id, collect_time,
-                                data_id, creat_time))
-            return data_id
+                            humidity, version_id, 
+                            creat_time) VALUES (%s, %s, %s, %s)""",
+                            (temperature, humidity, version_id, 
+                                creat_time))
+            return creat_time 
         
-        def sendBackDataID(data_id):
+        def sendBackDataTime(creat_time):
             self.transport.write("Upload Successful! " + 
-                "Requested data ID is {}".format(data_id+1))
+                "Latest data time is {}".format(creat_time))
             self.transport.loseConnection()
 
-        dbpool.runInteraction(dbData, dcts).addCallback(sendBackDataID)               
+        dbpool.runInteraction(dbData, dcts).addCallback(sendBackDataTime)
 
         def updateIP(transaction, ip):
             transaction.execute("""UPDATE map_node SET ip = %s WHERE node_id =
@@ -182,25 +180,27 @@ class DataServerProtocol(PiJsonReceiver):
         myObserver.msg("Data from node with ID: {} has been stored".
                 format(nodeID), logLevel = logging.DEBUG)
 
-    def _sendRequestedDataID(self, latestData):
-        lastDataId = 1
+    def _sendRequestedDataTime(self, latestData):
+        lastDataTS = None
         if latestData is None:
-            self.transport.write("requested data ID is 1")
+            self.transport.write("Latest data timestamp is 0000-00-00 00:00:00")
         else:
-            lastDataId = latestData.data_id
-            self.transport.write("requested data ID is {}".format(lastDataId + 1))
+            lastDataTS = latestData.creat_time
+            self.transport.write("Latest data timestamp is {}".format(lastDataTS))
         self.transport.loseConnection()
-        return lastDataId + 1
+        return lastDataTS 
 
-    def sendRequestedDataID(self, nodeVersion, nodeID):
+    def sendRequestedDataTime(self, nodeVersion, nodeID):
+        """Send the latest timestamp stored in db. Nodes are required to upload
+        newer data in terms of timestamp. """
         if nodeVersion is None:
             self.transport.write("Node version does not exsits. Try re-register?")
             self.transport.loseConnection()
             return
         version_id = nodeVersion.version_id
         d = MapData.find(where = ["version_id = ?", version_id],
-                         orderby = "data_id DESC", limit = 1)
-        d.addCallback(lambda res: self._sendRequestedDataID(res))
+                         orderby = "creat_time DESC", limit = 1)
+        d.addCallback(lambda res: self._sendRequestedDataTime(res))
         return d
 
     def requestHandler(self, dcts):
@@ -208,7 +208,7 @@ class DataServerProtocol(PiJsonReceiver):
         nodeID = dcts[0]["node_id"]
         d = MapNodeVersion.find(where = ["node_id = ?", nodeID],
                                 orderby = "version_id DESC", limit = 1)
-        d.addCallback(lambda res: self.sendRequestedDataID(res, nodeID))
+        d.addCallback(lambda res: self.sendRequestedDataTime(res, nodeID))
 
     def connectionLost(self, reason):
         pass
